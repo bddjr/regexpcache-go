@@ -1,3 +1,7 @@
+# regexpcache
+
+Reuse compiled regexp.
+
 ## Setup
 
 get
@@ -10,4 +14,17 @@ use
 
 ```go
 regexpcache.MustCompile(`\d+`)
+```
+
+## Logic
+
+```mermaid
+flowchart LR
+    HasCache{Has cache?}
+    Compile("Compile")
+    SetCache("Set cache")
+    Return(((Return)))
+
+    HasCache -- false --> Compile --> SetCache --> Return
+    HasCache -- true --> Return
 ```
