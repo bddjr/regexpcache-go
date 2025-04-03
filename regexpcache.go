@@ -84,11 +84,11 @@ func CompilePOSIX(expr string) (*regexp.Regexp, error) {
 		if re, ok := cachePOSIX[expr]; ok {
 			return re, nil
 		}
-		return regexp.Compile(expr)
+		return regexp.CompilePOSIX(expr)
 	}
 	channelsPOSIX[expr] = make(chan struct{})
 	lockPOSIX.Unlock()
-	re, err := regexp.Compile(expr)
+	re, err := regexp.CompilePOSIX(expr)
 	if err == nil {
 		cachePOSIX[expr] = re
 	}
