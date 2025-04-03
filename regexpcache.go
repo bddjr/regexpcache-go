@@ -8,11 +8,17 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"sync"
 )
 
 var (
-	cache      = map[string]*regexp.Regexp{}
-	cachePOSIX = map[string]*regexp.Regexp{}
+	cache    = map[string]*regexp.Regexp{}
+	lock     = sync.Mutex{}
+	channels = map[string]chan struct{}{}
+
+	cachePOSIX    = map[string]*regexp.Regexp{}
+	lockPOSIX     = sync.Mutex{}
+	channelsPOSIX = map[string]chan struct{}{}
 )
 
 // Compile parses a regular expression and returns, if successful,
@@ -29,10 +35,22 @@ func Compile(expr string) (*regexp.Regexp, error) {
 	if re, ok := cache[expr]; ok {
 		return re, nil
 	}
+	lock.Lock()
+	if c, ok := channels[expr]; ok {
+		lock.Unlock()
+		<-c
+		if re, ok := cache[expr]; ok {
+			return re, nil
+		}
+		return regexp.Compile(expr)
+	}
+	channels[expr] = make(chan struct{})
+	lock.Unlock()
 	re, err := regexp.Compile(expr)
 	if err == nil {
 		cache[expr] = re
 	}
+	close(channels[expr])
 	return re, err
 }
 
@@ -59,10 +77,22 @@ func CompilePOSIX(expr string) (*regexp.Regexp, error) {
 	if re, ok := cachePOSIX[expr]; ok {
 		return re, nil
 	}
-	re, err := regexp.CompilePOSIX(expr)
+	lockPOSIX.Lock()
+	if c, ok := channelsPOSIX[expr]; ok {
+		lockPOSIX.Unlock()
+		<-c
+		if re, ok := cachePOSIX[expr]; ok {
+			return re, nil
+		}
+		return regexp.Compile(expr)
+	}
+	channelsPOSIX[expr] = make(chan struct{})
+	lockPOSIX.Unlock()
+	re, err := regexp.Compile(expr)
 	if err == nil {
 		cachePOSIX[expr] = re
 	}
+	close(channelsPOSIX[expr])
 	return re, err
 }
 
