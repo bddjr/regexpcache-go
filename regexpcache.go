@@ -8,12 +8,21 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"sync"
 )
 
 var (
-	cache      = map[string]*regexp.Regexp{}
-	cachePOSIX = map[string]*regexp.Regexp{}
+	cache            = map[string]*cacheType{}
+	compileLock      sync.Mutex
+	cachePOSIX       = map[string]*cacheType{}
+	compilePOSIXLock sync.Mutex
 )
+
+type cacheType struct {
+	re   *regexp.Regexp
+	err  error
+	done chan struct{}
+}
 
 // Compile parses a regular expression and returns, if successful,
 // a [Regexp] object that can be used to match against text.
@@ -26,14 +35,31 @@ var (
 // package implements it without the expense of backtracking.
 // For POSIX leftmost-longest matching, see [CompilePOSIX].
 func Compile(expr string) (*regexp.Regexp, error) {
-	if re, ok := cache[expr]; ok {
-		return re, nil
+	if c, ok := cache[expr]; ok {
+		if c.re == nil && c.err == nil {
+			<-c.done
+		}
+		return c.re, c.err
 	}
-	re, err := regexp.Compile(expr)
-	if err == nil {
-		cache[expr] = re
+
+	compileLock.Lock()
+	if c, ok := cache[expr]; ok {
+		compileLock.Unlock()
+		if c.re == nil && c.err == nil {
+			<-c.done
+		}
+		return c.re, c.err
 	}
-	return re, err
+
+	c := cacheType{
+		done: make(chan struct{}),
+	}
+	cache[expr] = &c
+	compileLock.Unlock()
+
+	c.re, c.err = regexp.Compile(expr)
+	close(c.done)
+	return c.re, c.err
 }
 
 // CompilePOSIX is like [Compile] but restricts the regular expression
@@ -56,14 +82,31 @@ func Compile(expr string) (*regexp.Regexp, error) {
 // The POSIX rule is computationally prohibitive and not even well-defined.
 // See https://swtch.com/~rsc/regexp/regexp2.html#posix for details.
 func CompilePOSIX(expr string) (*regexp.Regexp, error) {
-	if re, ok := cachePOSIX[expr]; ok {
-		return re, nil
+	if c, ok := cachePOSIX[expr]; ok {
+		if c.re == nil && c.err == nil {
+			<-c.done
+		}
+		return c.re, c.err
 	}
-	re, err := regexp.CompilePOSIX(expr)
-	if err == nil {
-		cachePOSIX[expr] = re
+
+	compilePOSIXLock.Lock()
+	if c, ok := cachePOSIX[expr]; ok {
+		compilePOSIXLock.Unlock()
+		if c.re == nil && c.err == nil {
+			<-c.done
+		}
+		return c.re, c.err
 	}
-	return re, err
+
+	c := cacheType{
+		done: make(chan struct{}),
+	}
+	cachePOSIX[expr] = &c
+	compilePOSIXLock.Unlock()
+
+	c.re, c.err = regexp.CompilePOSIX(expr)
+	close(c.done)
+	return c.re, c.err
 }
 
 // MustCompile is like [Compile] but panics if the expression cannot be parsed.
