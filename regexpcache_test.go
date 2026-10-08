@@ -57,3 +57,64 @@ func TestCompilePOSIX(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentStress(t *testing.T) {
+	const goroutines = 100
+	var wg sync.WaitGroup
+	patterns := []string{`\d+`, `[a-z]+`, `(foo|bar)`, `\s*`, `[`, `invalid(`}
+
+	for _, p := range patterns {
+		p := p
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				re, err := regexpcache.Compile(p)
+				re2, err2 := regexpcache.Compile(p)
+				if (err == nil) != (err2 == nil) {
+					t.Errorf("mismatched error presence for %s", p)
+				}
+				if re != re2 {
+					t.Errorf("mismatched regexp pointer for %s", p)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+func TestConcurrentPOSIXStress(t *testing.T) {
+	const goroutines = 100
+	var wg sync.WaitGroup
+	patterns := []string{`[0-9]+`, `[a-z]+`, `(foo|bar)`, `[`, `invalid(`}
+
+	for _, p := range patterns {
+		p := p
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				re, err := regexpcache.CompilePOSIX(p)
+				re2, err2 := regexpcache.CompilePOSIX(p)
+				if (err == nil) != (err2 == nil) {
+					t.Errorf("mismatched error presence for %s", p)
+				}
+				if re != re2 {
+					t.Errorf("mismatched regexp pointer for %s", p)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+}
+
+func BenchmarkCompileHit(b *testing.B) {
+	regexpcache.Compile(`\d+`)
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = regexpcache.Compile(`\d+`)
+		}
+	})
+}

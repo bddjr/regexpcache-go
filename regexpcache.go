@@ -12,10 +12,8 @@ import (
 )
 
 var (
-	cache            = map[string]*cacheType{}
-	compileLock      sync.Mutex
-	cachePOSIX       = map[string]*cacheType{}
-	compilePOSIXLock sync.Mutex
+	cache      sync.Map
+	cachePOSIX sync.Map
 )
 
 type cacheType struct {
@@ -35,27 +33,21 @@ type cacheType struct {
 // package implements it without the expense of backtracking.
 // For POSIX leftmost-longest matching, see [CompilePOSIX].
 func Compile(expr string) (*regexp.Regexp, error) {
-	if c, ok := cache[expr]; ok {
-		if c.re == nil && c.err == nil {
-			<-c.done
-		}
+	if actual, ok := cache.Load(expr); ok {
+		c := actual.(*cacheType)
+		<-c.done
 		return c.re, c.err
 	}
 
-	compileLock.Lock()
-	if c, ok := cache[expr]; ok {
-		compileLock.Unlock()
-		if c.re == nil && c.err == nil {
-			<-c.done
-		}
-		return c.re, c.err
-	}
-
-	c := cacheType{
+	c := &cacheType{
 		done: make(chan struct{}),
 	}
-	cache[expr] = &c
-	compileLock.Unlock()
+	actual, loaded := cache.LoadOrStore(expr, c)
+	if loaded {
+		c = actual.(*cacheType)
+		<-c.done
+		return c.re, c.err
+	}
 
 	c.re, c.err = regexp.Compile(expr)
 	close(c.done)
@@ -82,27 +74,21 @@ func Compile(expr string) (*regexp.Regexp, error) {
 // The POSIX rule is computationally prohibitive and not even well-defined.
 // See https://swtch.com/~rsc/regexp/regexp2.html#posix for details.
 func CompilePOSIX(expr string) (*regexp.Regexp, error) {
-	if c, ok := cachePOSIX[expr]; ok {
-		if c.re == nil && c.err == nil {
-			<-c.done
-		}
+	if actual, ok := cachePOSIX.Load(expr); ok {
+		c := actual.(*cacheType)
+		<-c.done
 		return c.re, c.err
 	}
 
-	compilePOSIXLock.Lock()
-	if c, ok := cachePOSIX[expr]; ok {
-		compilePOSIXLock.Unlock()
-		if c.re == nil && c.err == nil {
-			<-c.done
-		}
-		return c.re, c.err
-	}
-
-	c := cacheType{
+	c := &cacheType{
 		done: make(chan struct{}),
 	}
-	cachePOSIX[expr] = &c
-	compilePOSIXLock.Unlock()
+	actual, loaded := cachePOSIX.LoadOrStore(expr, c)
+	if loaded {
+		c = actual.(*cacheType)
+		<-c.done
+		return c.re, c.err
+	}
 
 	c.re, c.err = regexp.CompilePOSIX(expr)
 	close(c.done)
